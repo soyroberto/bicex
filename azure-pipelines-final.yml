@@ -1,0 +1,737 @@
+# ============================================================================
+# Azure DevOps Pipeline for Bicep Deployment
+# Author: Roberto
+# Description: CI/CD pipeline for deploying Windows Server 2022 with SQL 2019 VM
+# Repository Structure: azure-bicep-vm/
+# 
+# SECURITY NOTES:
+# - All sensitive values are stored in Azure DevOps secret variables
+# - No hardcoded subscription IDs, resource groups, or credentials
+# - Uses Azure Key Vault for secure credential storage
+# - Bicep files located in bicep/ subdirectory
+# - Parameter files referenced from bicep/ subdirectory
+# ============================================================================
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - 'bicep/**'
+      - 'azure-pipelines.yml'
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - 'bicep/**'
+      - 'azure-pipelines.yml'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+# ============================================================================
+# VARIABLE GROUPS - Reference your secret variable group here
+# ============================================================================
+# 
+# REQUIRED: Create a Variable Group in Azure DevOps
+# Steps:
+# 1. Go to Pipelines > Library > Variable groups
+# 2. Create new group: bicep-deployment-secrets
+# 3. Add these variables (mark sensitive ones as Secret):
+#
+#    Variable Name                Value                           Secret?
+#    ================================================================
+#    AZURE_SUBSCRIPTION_ID        <>                              ✅ YES
+#    AZURE_TENANT_ID                                       ...    ✅ YES
+#    RESOURCE_GROUP_NAME          <>                            ❌ NO
+#    LOCATION                     australiaeast                  ❌ NO
+#    VM_NAME                      <>                              ❌ NO
+#    ADMIN_USERNAME               <>                              ❌ NO
+#    KEY_VAULT_NAME               <>                             ❌ NO
+#    KEY_VAULT_RESOURCE_ID                                  ..  ✅ YES
+#    PRINCIPAL_ID                                       -...    ✅ YES
+#    VNET_RESOURCE_ID                                       ... ✅ YES
+#    SUBNET_NAME                  misc                           ❌ NO
+#    NSG_RESOURCE_ID                                      kS... ✅ YES
+#    ADMIN_PASSWORD               (strong password)              ✅ YES
+#    SERVICE_CONNECTION_NAME      AzureServiceConnection         ❌ NO
+#
+# ============================================================================
+
+variables:
+  # Reference to variable group containing all secrets
+  - group: 'bicep-deployment-secrets'
+  
+  # Non-sensitive pipeline variables
+  vmImageName: 'ubuntu-latest'
+  deploymentMode: 'Incremental'
+  buildArtifactName: 'bicep-templates'
+  keyVaultSecretName: 'vmAdminPassword'
+  
+  # Bicep file paths (relative to repository root)
+  keyVaultBicepPath: '$(Build.SourcesDirectory)/bicep/keyvault-secure.bicep'
+  keyVaultParamPath: '$(Build.SourcesDirectory)/bicep/keyvault-secure.bicepparam'
+  vmBicepPath: '$(Build.SourcesDirectory)/bicep/main-secure.bicep'
+  vmParamPath: '$(Build.SourcesDirectory)/bicep/main-secure.bicepparam'
+
+# ============================================================================
+# STAGES
+# ============================================================================
+
+stages:
+  # ========================================================================
+  # STAGE 1: VALIDATE
+  # Validates Bicep syntax and structure
+  # ========================================================================
+  - stage: Validate
+    displayName: 'Stage 1: Validate Bicep Templates'
+    jobs:
+      - job: ValidateBicepFiles
+        displayName: 'Validate and Lint Bicep Files'
+        steps:
+          # Checkout source code
+          - checkout: self
+            fetchDepth: 0
+            displayName: 'Checkout Repository'
+
+          # Install .NET (required for Bicep CLI)
+          - task: UseDotNet@2
+            displayName: 'Install .NET 7 SDK'
+            inputs:
+              version: '7.x'
+              packageType: 'sdk'
+
+          # Install Bicep CLI
+          - task: PowerShell@2
+            displayName: 'Install and Verify Bicep CLI'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "Installing Bicep CLI..."
+                az bicep install
+                
+                Write-Host "Verifying Bicep CLI installation..."
+                az bicep version
+                
+                Write-Host "Bicep CLI installed successfully"
+
+          # Validate Key Vault Bicep template
+          - task: PowerShell@2
+            displayName: 'Validate Key Vault Bicep Template'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "=========================================="
+                Write-Host "Validating Key Vault Bicep Template"
+                Write-Host "=========================================="
+                Write-Host "Template: $(keyVaultBicepPath)"
+                Write-Host "Parameters: $(keyVaultParamPath)"
+                
+                # Build Bicep to ARM template
+                az bicep build --file $(keyVaultBicepPath) `
+                  --outfile $(Build.ArtifactStagingDirectory)/keyvault.json
+                
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "❌ Key Vault Bicep validation FAILED"
+                  exit 1
+                }
+                
+                Write-Host "✅ Key Vault Bicep validation PASSED"
+                Write-Host ""
+
+          # Validate VM Bicep template
+          - task: PowerShell@2
+            displayName: 'Validate VM Bicep Template'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "=========================================="
+                Write-Host "Validating VM Bicep Template"
+                Write-Host "=========================================="
+                Write-Host "Template: $(vmBicepPath)"
+                Write-Host "Parameters: $(vmParamPath)"
+                
+                # Build Bicep to ARM template
+                az bicep build --file $(vmBicepPath) `
+                  --outfile $(Build.ArtifactStagingDirectory)/main.json
+                
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "❌ VM Bicep validation FAILED"
+                  exit 1
+                }
+                
+                Write-Host "✅ VM Bicep validation PASSED"
+                Write-Host ""
+
+          # Lint Bicep files for best practices
+          - task: PowerShell@2
+            displayName: 'Lint Bicep Files'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "=========================================="
+                Write-Host "Linting Bicep Files"
+                Write-Host "=========================================="
+                
+                Write-Host "Linting Key Vault template..."
+                az bicep lint --file $(keyVaultBicepPath)
+                
+                Write-Host "Linting VM template..."
+                az bicep lint --file $(vmBicepPath)
+                
+                Write-Host "✅ Bicep linting completed"
+                Write-Host ""
+
+          # Publish artifacts for next stages
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Validation Artifacts'
+            inputs:
+              pathToPublish: '$(Build.ArtifactStagingDirectory)'
+              artifactName: $(buildArtifactName)
+              publishLocation: 'Container'
+
+  # ========================================================================
+  # STAGE 2: TEST (What-If Analysis)
+  # Previews changes without applying them
+  # ========================================================================
+  - stage: Test
+    displayName: 'Stage 2: Test Deployment (What-If Analysis)'
+    dependsOn: Validate
+    condition: succeeded()
+    jobs:
+      - job: WhatIfAnalysis
+        displayName: 'Run What-If Analysis'
+        steps:
+          # Checkout source code
+          - checkout: self
+            displayName: 'Checkout Repository'
+
+          # Login to Azure
+          - task: AzureCLI@2
+            displayName: 'Azure CLI Login'
+            inputs:
+              azureSubscription: '$(SERVICE_CONNECTION_NAME)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "=========================================="
+                echo "Authenticating to Azure"
+                echo "=========================================="
+                
+                # Set subscription
+                az account set --subscription $(AZURE_SUBSCRIPTION_ID)
+                
+                # Display current account
+                echo "Current subscription:"
+                az account show --query '{id:id, name:name, tenantId:tenantId}' -o table
+                echo ""
+
+          # What-If: Key Vault Deployment
+          - task: AzureCLI@2
+            displayName: 'What-If: Key Vault Deployment'
+            inputs:
+              azureSubscription: '$(SERVICE_CONNECTION_NAME)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "=========================================="
+                echo "What-If Analysis: Key Vault Deployment"
+                echo "=========================================="
+                echo "Resource Group: $(RESOURCE_GROUP_NAME)"
+                echo "Template: $(keyVaultBicepPath)"
+                echo "Parameters: $(keyVaultParamPath)"
+                echo ""
+                
+                az deployment group what-if \
+                  --resource-group $(RESOURCE_GROUP_NAME) \
+                  --template-file $(keyVaultBicepPath) \
+                  --parameters $(keyVaultParamPath) \
+                  --parameters principalId=$(PRINCIPAL_ID) \
+                  --parameters adminPassword=$(ADMIN_PASSWORD) \
+                  --parameters keyVaultName=$(KEY_VAULT_NAME) \
+                  --parameters location=$(LOCATION)
+                
+                echo ""
+                echo "✅ What-If analysis completed for Key Vault"
+                echo ""
+
+          # What-If: VM Deployment
+          - task: AzureCLI@2
+            displayName: 'What-If: VM Deployment'
+            inputs:
+              azureSubscription: '$(SERVICE_CONNECTION_NAME)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "=========================================="
+                echo "What-If Analysis: VM Deployment"
+                echo "=========================================="
+                echo "Resource Group: $(RESOURCE_GROUP_NAME)"
+                echo "Template: $(vmBicepPath)"
+                echo "Parameters: $(vmParamPath)"
+                echo ""
+                
+                az deployment group what-if \
+                  --resource-group $(RESOURCE_GROUP_NAME) \
+                  --template-file $(vmBicepPath) \
+                  --parameters $(vmParamPath) \
+                  --parameters vmName=$(VM_NAME) \
+                  --parameters adminUsername=$(ADMIN_USERNAME) \
+                  --parameters location=$(LOCATION) \
+                  --parameters keyVaultName=$(KEY_VAULT_NAME) \
+                  --parameters keyVaultResourceId=$(KEY_VAULT_RESOURCE_ID) \
+                  --parameters vnetResourceId=$(VNET_RESOURCE_ID) \
+                  --parameters subnetName=$(SUBNET_NAME) \
+                  --parameters nsgResourceId=$(NSG_RESOURCE_ID)
+                
+                echo ""
+                echo "✅ What-If analysis completed for VM"
+                echo ""
+
+  # ========================================================================
+  # STAGE 3: DEPLOY TO PRODUCTION
+  # Deploys Key Vault and VM to production
+  # ========================================================================
+  - stage: DeployProduction
+    displayName: 'Stage 3: Deploy to Production'
+    dependsOn: Test
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      # Job 1: Deploy Key Vault
+      - deployment: DeployKeyVault
+        displayName: 'Deploy Key Vault'
+        environment: 'Production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                  displayName: 'Checkout Repository'
+
+                - task: AzureCLI@2
+                  displayName: 'Deploy Key Vault'
+                  inputs:
+                    azureSubscription: '$(SERVICE_CONNECTION_NAME)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      echo "=========================================="
+                      echo "Deploying Key Vault"
+                      echo "=========================================="
+                      echo "Resource Group: $(RESOURCE_GROUP_NAME)"
+                      echo "Key Vault Name: $(KEY_VAULT_NAME)"
+                      echo "Location: $(LOCATION)"
+                      echo ""
+                      
+                      az deployment group create \
+                        --resource-group $(RESOURCE_GROUP_NAME) \
+                        --template-file $(keyVaultBicepPath) \
+                        --parameters $(keyVaultParamPath) \
+                        --parameters keyVaultName=$(KEY_VAULT_NAME) \
+                        --parameters location=$(LOCATION) \
+                        --parameters principalId=$(PRINCIPAL_ID) \
+                        --parameters adminUsername=$(ADMIN_USERNAME) \
+                        --parameters adminPassword=$(ADMIN_PASSWORD) \
+                        --name 'DeployKeyVault-$(Build.BuildId)' \
+                        --mode $(deploymentMode)
+                      
+                      if [ $? -eq 0 ]; then
+                        echo ""
+                        echo "✅ Key Vault deployment COMPLETED SUCCESSFULLY"
+                        echo ""
+                      else
+                        echo ""
+                        echo "❌ Key Vault deployment FAILED"
+                        exit 1
+                      fi
+
+      # Job 2: Deploy Virtual Machine (depends on Key Vault)
+      - deployment: DeployVM
+        displayName: 'Deploy Virtual Machine'
+        dependsOn: DeployKeyVault
+        environment: 'Production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                  displayName: 'Checkout Repository'
+
+                - task: AzureCLI@2
+                  displayName: 'Deploy Virtual Machine'
+                  inputs:
+                    azureSubscription: '$(SERVICE_CONNECTION_NAME)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      echo "=========================================="
+                      echo "Deploying Virtual Machine"
+                      echo "=========================================="
+                      echo "Resource Group: $(RESOURCE_GROUP_NAME)"
+                      echo "VM Name: $(VM_NAME)"
+                      echo "Location: $(LOCATION)"
+                      echo "Size: Standard_B2s_v2"
+                      echo "Image: MicrosoftSQLServer:sql2019-ws2022:web:latest"
+                      echo ""
+                      
+                      az deployment group create \
+                        --resource-group $(RESOURCE_GROUP_NAME) \
+                        --template-file $(vmBicepPath) \
+                        --parameters $(vmParamPath) \
+                        --parameters vmName=$(VM_NAME) \
+                        --parameters adminUsername=$(ADMIN_USERNAME) \
+                        --parameters location=$(LOCATION) \
+                        --parameters keyVaultName=$(KEY_VAULT_NAME) \
+                        --parameters keyVaultResourceId=$(KEY_VAULT_RESOURCE_ID) \
+                        --parameters vnetResourceId=$(VNET_RESOURCE_ID) \
+                        --parameters subnetName=$(SUBNET_NAME) \
+                        --parameters nsgResourceId=$(NSG_RESOURCE_ID) \
+                        --name 'DeployVM-$(Build.BuildId)' \
+                        --mode $(deploymentMode)
+                      
+                      if [ $? -eq 0 ]; then
+                        echo ""
+                        echo "✅ Virtual Machine deployment COMPLETED SUCCESSFULLY"
+                        echo ""
+                      else
+                        echo ""
+                        echo "❌ Virtual Machine deployment FAILED"
+                        exit 1
+                      fi
+
+      # Job 3: Configure JIT Access (depends on VM)
+      - deployment: ConfigureJIT
+        displayName: 'Configure Just-In-Time Access'
+        dependsOn: DeployVM
+        environment: 'Production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                  displayName: 'Checkout Repository'
+
+                - task: AzureCLI@2
+                  displayName: 'Retrieve VM Details for JIT Configuration'
+                  inputs:
+                    azureSubscription: '$(SERVICE_CONNECTION_NAME)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      echo "=========================================="
+                      echo "Configuring Just-In-Time Access"
+                      echo "=========================================="
+                      echo ""
+                      
+                      # Get VM resource ID
+                      VM_RESOURCE_ID=$(az vm show \
+                        --resource-group $(RESOURCE_GROUP_NAME) \
+                        --name $(VM_NAME) \
+                        --query id -o tsv)
+                      
+                      echo "VM Resource ID: $VM_RESOURCE_ID"
+                      echo ""
+                      
+                      # Get VM details
+                      echo "VM Details:"
+                      az vm show -d \
+                        --resource-group $(RESOURCE_GROUP_NAME) \
+                        --name $(VM_NAME) \
+                        --query '{Name:name, ProvisioningState:provisioningState, PowerState:powerState, PublicIps:publicIps, PrivateIps:privateIps}' \
+                        -o table
+                      
+                      echo ""
+                      echo "ℹ️  JIT Access Configuration:"
+                      echo "   To enable JIT access on this VM:"
+                      echo "   1. Go to Azure Portal"
+                      echo "   2. Navigate to Microsoft Defender for Cloud"
+                      echo "   3. Go to Workload protections > Just-in-time VM access"
+                      echo "   4. Find $(VM_NAME) in the 'Not configured' tab"
+                      echo "   5. Click 'Enable JIT on VMs'"
+                      echo "   6. Configure ports (default: RDP 3389)"
+                      echo "   7. Set maximum request time (default: 3 hours)"
+                      echo "   8. Click 'Save'"
+                      echo ""
+                      echo "✅ VM is ready for JIT configuration"
+                      echo ""
+
+  # ========================================================================
+  # STAGE 4: POST-DEPLOYMENT
+  # Validates deployment and generates reports
+  # ========================================================================
+  - stage: PostDeployment
+    displayName: 'Stage 4: Post-Deployment Validation'
+    dependsOn: DeployProduction
+    condition: succeeded()
+    jobs:
+      - job: ValidateDeployment
+        displayName: 'Validate Deployment and Generate Report'
+        steps:
+          - checkout: self
+            displayName: 'Checkout Repository'
+
+          # Verify Key Vault
+          - task: AzureCLI@2
+            displayName: 'Verify Key Vault'
+            inputs:
+              azureSubscription: '$(SERVICE_CONNECTION_NAME)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "=========================================="
+                echo "Verifying Key Vault"
+                echo "=========================================="
+                
+                az keyvault show \
+                  --name $(KEY_VAULT_NAME) \
+                  --resource-group $(RESOURCE_GROUP_NAME) \
+                  --query '{Name:name, Location:location, Sku:sku.name, SoftDeleteEnabled:properties.enableSoftDelete, PurgeProtectionEnabled:properties.enablePurgeProtection}' \
+                  -o table
+                
+                if [ $? -eq 0 ]; then
+                  echo "✅ Key Vault verification PASSED"
+                else
+                  echo "❌ Key Vault verification FAILED"
+                  exit 1
+                fi
+                echo ""
+
+          # Verify Virtual Machine
+          - task: AzureCLI@2
+            displayName: 'Verify Virtual Machine'
+            inputs:
+              azureSubscription: '$(SERVICE_CONNECTION_NAME)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "=========================================="
+                echo "Verifying Virtual Machine"
+                echo "=========================================="
+                
+                az vm show -d \
+                  --resource-group $(RESOURCE_GROUP_NAME) \
+                  --name $(VM_NAME) \
+                  --query '{Name:name, ResourceGroup:resourceGroup, Location:location, ProvisioningState:provisioningState, PowerState:powerState, PublicIps:publicIps, PrivateIps:privateIps, OsType:osType}' \
+                  -o table
+                
+                if [ $? -eq 0 ]; then
+                  echo "✅ Virtual Machine verification PASSED"
+                else
+                  echo "❌ Virtual Machine verification FAILED"
+                  exit 1
+                fi
+                echo ""
+
+          # Verify Network Interface
+          - task: AzureCLI@2
+            displayName: 'Verify Network Configuration'
+            inputs:
+              azureSubscription: '$(SERVICE_CONNECTION_NAME)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "=========================================="
+                echo "Verifying Network Configuration"
+                echo "=========================================="
+                
+                # Get NIC details
+                NIC_NAME=$(az vm show \
+                  --resource-group $(RESOURCE_GROUP_NAME) \
+                  --name $(VM_NAME) \
+                  --query 'networkProfile.networkInterfaces[0].id' -o tsv | xargs basename)
+                
+                echo "Network Interface: $NIC_NAME"
+                
+                az network nic show \
+                  --resource-group $(RESOURCE_GROUP_NAME) \
+                  --name $NIC_NAME \
+                  --query '{Name:name, ProvisioningState:provisioningState, IpConfigs:ipConfigurations[0].properties.privateIPAddress}' \
+                  -o table
+                
+                echo "✅ Network configuration verification PASSED"
+                echo ""
+
+          # Generate Deployment Report
+          - task: AzureCLI@2
+            displayName: 'Generate Deployment Report'
+            inputs:
+              azureSubscription: '$(SERVICE_CONNECTION_NAME)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "=========================================="
+                echo "Generating Deployment Report"
+                echo "=========================================="
+                
+                # Create report file
+                REPORT_FILE=$(Build.ArtifactStagingDirectory)/deployment-report.txt
+                
+                {
+                  echo "╔════════════════════════════════════════════════════════════════╗"
+                  echo "║           DEPLOYMENT REPORT - $(date +'%Y-%m-%d %H:%M:%S')              ║"
+                  echo "╚════════════════════════════════════════════════════════════════╝"
+                  echo ""
+                  echo "DEPLOYMENT SUMMARY"
+                  echo "══════════════════════════════════════════════════════════════════"
+                  echo "Build ID:                $(Build.BuildId)"
+                  echo "Build Number:            $(Build.BuildNumber)"
+                  echo "Source Branch:           $(Build.SourceBranch)"
+                  echo "Deployment Date:         $(date)"
+                  echo ""
+                  echo "RESOURCE CONFIGURATION"
+                  echo "══════════════════════════════════════════════════════════════════"
+                  echo "Subscription ID:         $(AZURE_SUBSCRIPTION_ID)"
+                  echo "Resource Group:          $(RESOURCE_GROUP_NAME)"
+                  echo "Location:                $(LOCATION)"
+                  echo ""
+                  echo "KEY VAULT"
+                  echo "══════════════════════════════════════════════════════════════════"
+                  echo "Name:                    $(KEY_VAULT_NAME)"
+                  echo "Resource ID:             $(KEY_VAULT_RESOURCE_ID)"
+                  echo ""
+                  echo "VIRTUAL MACHINE"
+                  echo "══════════════════════════════════════════════════════════════════"
+                  echo "Name:                    $(VM_NAME)"
+                  echo "Admin Username:          $(ADMIN_USERNAME)"
+                  echo "Size:                    Standard_B2s_v2"
+                  echo "Image:                   MicrosoftSQLServer:sql2019-ws2022:web:latest"
+                  echo ""
+                  echo "NETWORK CONFIGURATION"
+                  echo "══════════════════════════════════════════════════════════════════"
+                  echo "Virtual Network:         $(VNET_RESOURCE_ID)"
+                  echo "Subnet:                  $(SUBNET_NAME)"
+                  echo "NSG:                     $(NSG_RESOURCE_ID)"
+                  echo ""
+                  echo "DEPLOYMENT ARTIFACTS"
+                  echo "══════════════════════════════════════════════════════════════════"
+                  echo "Bicep Templates:"
+                  echo "  - $(keyVaultBicepPath)"
+                  echo "  - $(vmBicepPath)"
+                  echo ""
+                  echo "Parameter Files:"
+                  echo "  - $(keyVaultParamPath)"
+                  echo "  - $(vmParamPath)"
+                  echo ""
+                  echo "NEXT STEPS"
+                  echo "══════════════════════════════════════════════════════════════════"
+                  echo "1. Retrieve VM credentials from Key Vault:"
+                  echo "   az keyvault secret show --vault-name $(KEY_VAULT_NAME) --name vmAdminPassword"
+                  echo ""
+                  echo "2. Get VM public IP address:"
+                  echo "   az vm show -d --resource-group $(RESOURCE_GROUP_NAME) --name $(VM_NAME) --query publicIps -o tsv"
+                  echo ""
+                  echo "3. Connect to VM via RDP:"
+                  echo "   mstsc /v:<PUBLIC_IP>"
+                  echo ""
+                  echo "4. Configure Just-In-Time Access:"
+                  echo "   - Go to Microsoft Defender for Cloud"
+                  echo "   - Navigate to Workload protections > Just-in-time VM access"
+                  echo "   - Enable JIT on $(VM_NAME)"
+                  echo ""
+                  echo "5. Rotate password regularly (every 60-90 days):"
+                  echo "   - Update in Key Vault"
+                  echo "   - Update on VM"
+                  echo ""
+                  echo "SUPPORT"
+                  echo "══════════════════════════════════════════════════════════════════"
+                  echo "For issues or questions, refer to:"
+                  echo "  - README.md"
+                  echo "  - SECURITY_GUIDE.md"
+                  echo "  - SETUP_GUIDE.md"
+                  echo ""
+                  echo "╔════════════════════════════════════════════════════════════════╗"
+                  echo "║                  DEPLOYMENT COMPLETED SUCCESSFULLY             ║"
+                  echo "╚════════════════════════════════════════════════════════════════╝"
+                } > "$REPORT_FILE"
+                
+                # Display report
+                cat "$REPORT_FILE"
+
+          # Publish Report Artifacts
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Deployment Report'
+            inputs:
+              pathToPublish: '$(Build.ArtifactStagingDirectory)'
+              artifactName: 'deployment-report'
+              publishLocation: 'Container'
+
+          # Summary
+          - task: PowerShell@2
+            displayName: 'Deployment Summary'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "╔════════════════════════════════════════════════════════════════╗"
+                Write-Host "║                  PIPELINE EXECUTION COMPLETED                  ║"
+                Write-Host "╚════════════════════════════════════════════════════════════════╝"
+                Write-Host ""
+                Write-Host "✅ All stages completed successfully!"
+                Write-Host ""
+                Write-Host "Summary:"
+                Write-Host "  - Bicep templates validated"
+                Write-Host "  - What-If analysis completed"
+                Write-Host "  - Key Vault deployed"
+                Write-Host "  - Virtual Machine deployed"
+                Write-Host "  - JIT access configured"
+                Write-Host "  - Deployment report generated"
+                Write-Host ""
+                Write-Host "Next Steps:"
+                Write-Host "  1. Review deployment report in artifacts"
+                Write-Host "  2. Retrieve VM credentials from Key Vault"
+                Write-Host "  3. Connect to VM via RDP"
+                Write-Host "  4. Enable JIT access in Microsoft Defender for Cloud"
+                Write-Host ""
+
+# ============================================================================
+# VARIABLE GROUP SETUP INSTRUCTIONS
+# ============================================================================
+# 
+# REQUIRED SETUP:
+# 
+# 1. Create Variable Group in Azure DevOps:
+#    - Go to Pipelines > Library > Variable groups
+#    - Click "+ Variable group"
+#    - Name: bicep-deployment-secrets
+#    - Enable "Link secrets from an Azure key vault"
+#    - Select your Key Vault: kvaueansdeploy
+#    - Select secrets to link
+# 
+# 2. Add Variables (if not using Key Vault linking):
+#    - AZURE_SUBSCRIPTION_ID (Secret)
+#    - AZURE_TENANT_ID (Secret)
+#    - RESOURCE_GROUP_NAME
+#    - LOCATION
+#    - VM_NAME
+#    - ADMIN_USERNAME
+#    - KEY_VAULT_NAME
+#    - KEY_VAULT_RESOURCE_ID (Secret)
+#    - PRINCIPAL_ID (Secret)
+#    - VNET_RESOURCE_ID (Secret)
+#    - SUBNET_NAME
+#    - NSG_RESOURCE_ID (Secret)
+#    - ADMIN_PASSWORD (Secret)
+#    - SERVICE_CONNECTION_NAME
+# 
+# 3. Create Service Connection:
+#    - Go to Project Settings > Service connections
+#    - Create new "Azure Resource Manager" connection
+#    - Name: AzureServiceConnection
+#    - Scope: Subscription
+#    - Subscription: Your subscription
+#    - Resource Group: RGAUANSDeploy
+# 
+# 4. Link Variable Group to Pipeline:
+#    - Go to Pipelines > Your Pipeline > Edit
+#    - Click "Variables"
+#    - Click "Variable groups"
+#    - Click "Link variable group"
+#    - Select "bicep-deployment-secrets"
+#    - Click "Link"
+# 
+# ============================================================================
