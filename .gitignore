@@ -1,0 +1,30 @@
+# Secrets
+*.secret
+*.env
+.env.local
+secrets.json
+credentials.json
+
+# Azure
+azureauth.json
+*.publishsettings
+*.pfx
+*.cer
+
+# Bicep/ARM
+*.parameters.json
+*-parameters.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log
