@@ -1,14 +1,8 @@
 using './main.bicep'
 
-// Non-sensitive values only
-param vmName = 'vmauansvm01'
+param vmName = 'vmausbixvm01'  //changed, Roberto
 param adminUsername = 'roberto'
 param vmSize = 'Standard_B2s_v2'
-param location = 'australiaeast'   
+param location = 'australiasoutheast'
 param subnetName = 'misc'
 param keyVaultSecretName = 'vmAdminPassword'
-
-// These will be provided by pipeline
-// param vnetResourceId
-// param nsgResourceId  
-// param keyVaultName

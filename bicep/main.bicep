@@ -137,7 +137,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 
 // Outputs
 output vmId string = vm.id
-output vmName string = vm.name
+output vmName string = vmName
 output privateIpAddress string = nic.properties.ipConfigurations[0].properties.privateIPAddress
 output publicIpAddress string = publicIP.properties.ipAddress
 output adminUsername string = adminUsername
