@@ -79,8 +79,11 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
   name: keyVaultName
 }
 
-// Get secret reference (not value)
-var adminPassword = keyVault.getSecret(keyVaultSecretName)
+// Reference existing secret from Key Vault
+resource vmPassword 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = {
+  name: keyVaultSecretName
+  parent: keyVault
+}
 
 resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: vmName
@@ -93,7 +96,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
     osProfile: {
       computerName: vmName
       adminUsername: adminUsername
-      adminPassword: adminPassword
+      adminPassword: vmPassword.properties.value
       windowsConfiguration: {
         enableAutomaticUpdates: true
         provisionVMAgent: true

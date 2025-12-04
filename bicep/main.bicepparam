@@ -4,6 +4,7 @@ using './main.bicep'
 param vmName = 'vmauansvm01'
 param adminUsername = 'roberto'
 param vmSize = 'Standard_B2s_v2'
+param location = 'australiaeast'   
 param subnetName = 'misc'
 param keyVaultSecretName = 'vmAdminPassword'
 
