@@ -80,7 +80,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
   name: keyVaultName
 }
 
-// Get the secret reference properly
+// Reference existing secret
 resource vmPassword 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = {
   name: keyVaultSecretName
   parent: keyVault
@@ -98,15 +98,11 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
     osProfile: {
       computerName: vmName
       adminUsername: adminUsername
-      // CORRECT: Use the secretUri for password reference
-      adminPassword: vmPassword.properties.secretUri
+      // CORRECT: Get secret value using reference() function
+      adminPassword: reference(vmPassword.id, vmPassword.apiVersion).value
       windowsConfiguration: {
         enableAutomaticUpdates: true
         provisionVMAgent: true
-        patchSettings: {
-          patchMode: 'AutomaticByPlatform'
-          assessmentMode: 'ImageDefault'
-        }
       }
     }
     storageProfile: {
