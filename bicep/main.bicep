@@ -80,10 +80,23 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
   name: keyVaultName
 }
 
-// Reference existing secret
-resource vmPassword 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = {
-  name: keyVaultSecretName
-  parent: keyVault
+// Get secret value using listKeyVaultSecret (CORRECT METHOD)
+module keyVaultSecret 'Microsoft.Resources/deployments@2023-07-01' = {
+  name: 'keyVaultSecretRetrieval'
+  properties: {
+    mode: 'Incremental'
+    template: {
+      '$schema': 'https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#'
+      contentVersion: '1.0.0.0'
+      resources: []
+      outputs: {
+        secretValue: {
+          type: 'string'
+          value: listKeyVaultSecret(keyVault.id, keyVaultSecretName).value
+        }
+      }
+    }
+  }
 }
 
 // Virtual Machine with SQL Server 2019
@@ -98,8 +111,8 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
     osProfile: {
       computerName: vmName
       adminUsername: adminUsername
-      // CORRECT: Get secret value using reference() function
-      adminPassword: reference(vmPassword.id, vmPassword.apiVersion).value
+      // CORRECT: Get secret value from module output
+      adminPassword: keyVaultSecret.outputs.secretValue
       windowsConfiguration: {
         enableAutomaticUpdates: true
         provisionVMAgent: true
