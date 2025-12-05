@@ -1,12 +1,13 @@
 // ============================================================================
 // Azure VM Deployment with SQL Server 2019
 // Updated for secure pipeline deployment
+// ============================================================================
+
 metadata description = 'Deploy a Windows Server 2022 VM with SQL Server 2019 using Bicep'
 metadata author = 'Roberto'
 metadata version = '1.0.0'
-// ============================================================================
 
-param vmName string = 'vmauansvm01'
+param vmName string = 'vmausbixvm01'
 param adminUsername string = 'roberto'
 param vmSize string = 'Standard_B2s_v2'
 param location string = resourceGroup().location
@@ -79,12 +80,13 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
   name: keyVaultName
 }
 
-// Reference existing secret from Key Vault
+// Get the secret reference properly
 resource vmPassword 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = {
   name: keyVaultSecretName
   parent: keyVault
 }
 
+// Virtual Machine with SQL Server 2019
 resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: vmName
   location: location
@@ -96,7 +98,8 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
     osProfile: {
       computerName: vmName
       adminUsername: adminUsername
-      adminPassword: vmPassword.properties.value
+      // CORRECT: Use the secretUri for password reference
+      adminPassword: vmPassword.properties.secretUri
       windowsConfiguration: {
         enableAutomaticUpdates: true
         provisionVMAgent: true
@@ -137,7 +140,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 
 // Outputs
 output vmId string = vm.id
-output vmName string = vmName
+output vmName string = vm.name
 output privateIpAddress string = nic.properties.ipConfigurations[0].properties.privateIPAddress
 output publicIpAddress string = publicIP.properties.ipAddress
 output adminUsername string = adminUsername
