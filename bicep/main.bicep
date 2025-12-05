@@ -1,6 +1,6 @@
 // ============================================================================
 // Azure VM Deployment with SQL Server 2019
-// Updated for secure pipeline deployment
+// SIMPLIFIED VERSION - Password passed as parameter
 // ============================================================================
 
 metadata description = 'Deploy a Windows Server 2022 VM with SQL Server 2019 using Bicep'
@@ -9,6 +9,7 @@ metadata version = '1.0.0'
 
 param vmName string = 'vmausbixvm01'
 param adminUsername string = 'roberto'
+param adminPassword string  // ← ADD THIS PARAMETER
 param vmSize string = 'Standard_B2s_v2'
 param location string = resourceGroup().location
 
@@ -17,7 +18,6 @@ param vnetResourceId string
 param subnetName string = 'misc'
 param nsgResourceId string
 param keyVaultName string
-param keyVaultSecretName string = 'vmAdminPassword'
 
 param tags object = {
   environment: 'production'
@@ -75,30 +75,6 @@ resource publicIP 'Microsoft.Network/publicIPAddresses@2023-11-01' = {
   }
 }
 
-// Reference existing Key Vault
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
-  name: keyVaultName
-}
-
-// Get secret value using listKeyVaultSecret (CORRECT METHOD)
-module keyVaultSecret 'Microsoft.Resources/deployments@2023-07-01' = {
-  name: 'keyVaultSecretRetrieval'
-  properties: {
-    mode: 'Incremental'
-    template: {
-      '$schema': 'https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#'
-      contentVersion: '1.0.0.0'
-      resources: []
-      outputs: {
-        secretValue: {
-          type: 'string'
-          value: listKeyVaultSecret(keyVault.id, keyVaultSecretName).value
-        }
-      }
-    }
-  }
-}
-
 // Virtual Machine with SQL Server 2019
 resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: vmName
@@ -111,8 +87,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
     osProfile: {
       computerName: vmName
       adminUsername: adminUsername
-      // CORRECT: Get secret value from module output
-      adminPassword: keyVaultSecret.outputs.secretValue
+      adminPassword: adminPassword  // ← Use parameter directly
       windowsConfiguration: {
         enableAutomaticUpdates: true
         provisionVMAgent: true
