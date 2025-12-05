@@ -24,23 +24,27 @@ stages:
                 - checkout: self
                   displayName: 'Checkout Code'
                 
+                # FIXED: Use inlineScript instead of scriptPath
                 - task: AzureCLI@2
                   displayName: 'Install Bicep'
                   inputs:
                     azureSubscription: '$(serviceConnection)'
                     scriptType: 'bash'
-                    inlineScript: |
+                    scriptLocation: 'inlineScript'  # ← ADD THIS
+                    inlineScript: |                 # ← USE THIS
                       echo "Installing Bicep CLI..."
                       az bicep install
                       echo "Bicep version:"
                       az bicep version
                 
+                # FIXED: Same fix for deploy task
                 - task: AzureCLI@2
                   displayName: 'Deploy Virtual Machine'
                   inputs:
                     azureSubscription: '$(serviceConnection)'
                     scriptType: 'bash'
-                    inlineScript: |
+                    scriptLocation: 'inlineScript'  # ← ADD THIS
+                    inlineScript: |                 # ← USE THIS
                       echo "=========================================="
                       echo "Deploying SQL Server VM"
                       echo "=========================================="
