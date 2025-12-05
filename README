@@ -1,0 +1,16 @@
+## Bicep Azure VM Deploy
+Read the full howto at 
+[text](https://allthingscloud.net/handson-deploying-a-secure-sql-server-vm-on-azure-with-infrastructure-as-code-and-just-in-time-access)
+This deployment demonstrates a production-ready pattern for secure Azure VM deployment that balances security, automation, and maintainability. By leveraging BICEP, secure secret management, and Just-in-Time access, organizations can significantly reduce their attack surface while maintaining operational efficiency.
+
+The complete solution took approximately 2 hours from initial repository creation to successful VM connection, with the majority of time spent on configuration and debugging rather than manual infrastructure provisioning. Subsequent deployments would take under 15 minutes, showcasing the power of automated infrastructure delivery.
+
+Key Metrics:
+
+Code artifacts: 2 Bicep files under the bicep folder, 1 pipeline YAML
+
+Azure resources: 6 resources deployed (VM, NIC, Public IP, OS Disk, NSG reference, VNet reference)
+
+Security controls: 3 layers (RBAC, Key Vault, JIT)
+
+Automation level: 95% automated, manual JIT request only
