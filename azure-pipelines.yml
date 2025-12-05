@@ -1,3 +1,7 @@
+# ============================================================================
+# Azure DevOps Pipeline for Bicep VM Deployment
+# ============================================================================
+
 trigger:
   branches:
     include:
@@ -7,7 +11,10 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
+  # Variable group containing all secrets
   - group: 'bicep-deployment-secrets'
+  
+  # Service connection name (must match Azure DevOps)
   - name: serviceConnection
     value: 'AzureServiceConnection'
 
@@ -16,35 +23,37 @@ stages:
     displayName: 'Deploy SQL Server VM'
     jobs:
       - deployment: DeployVM
+        displayName: 'Deploy Virtual Machine'
         environment: 'Production'
         strategy:
           runOnce:
             deploy:
               steps:
+                # Checkout code from GitHub
                 - checkout: self
                   displayName: 'Checkout Code'
                 
-                # FIXED: Use inlineScript instead of scriptPath
+                # Install Bicep CLI
                 - task: AzureCLI@2
-                  displayName: 'Install Bicep'
+                  displayName: 'Install Bicep CLI'
                   inputs:
                     azureSubscription: '$(serviceConnection)'
                     scriptType: 'bash'
-                    scriptLocation: 'inlineScript'  # ← ADD THIS
-                    inlineScript: |                 # ← USE THIS
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
                       echo "Installing Bicep CLI..."
                       az bicep install
                       echo "Bicep version:"
                       az bicep version
                 
-                # FIXED: Same fix for deploy task
+                # Deploy Virtual Machine with SQL Server
                 - task: AzureCLI@2
                   displayName: 'Deploy Virtual Machine'
                   inputs:
                     azureSubscription: '$(serviceConnection)'
                     scriptType: 'bash'
-                    scriptLocation: 'inlineScript'  # ← ADD THIS
-                    inlineScript: |                 # ← USE THIS
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
                       echo "=========================================="
                       echo "Deploying SQL Server VM"
                       echo "=========================================="
@@ -54,15 +63,19 @@ stages:
                       echo "Key Vault: $(KEY_VAULT_NAME)"
                       echo ""
                       
-                      # Deploy VM
+                      # Deploy VM with all parameters passed directly
                       az deployment group create \
                         --resource-group $(RESOURCE_GROUP_NAME) \
                         --template-file bicep/main.bicep \
-                        --parameters @bicep/main.bicepparam \
+                        --parameters vmName="$(VM_NAME)" \
+                        --parameters adminUsername="$(ADMIN_USERNAME)" \
+                        --parameters vmSize="Standard_B2s_v2" \
+                        --parameters location="$(LOCATION)" \
+                        --parameters subnetName="misc" \
+                        --parameters keyVaultSecretName="vmAdminPassword" \
                         --parameters vnetResourceId="$(VNET_RESOURCE_ID)" \
                         --parameters nsgResourceId="$(NSG_RESOURCE_ID)" \
                         --parameters keyVaultName="$(KEY_VAULT_NAME)" \
-                        --parameters location="$(LOCATION)" \
                         --name "vm-deploy-$(Build.BuildId)"
                       
                       if [ $? -eq 0 ]; then
@@ -70,7 +83,7 @@ stages:
                         echo "✅ VM deployment completed successfully!"
                         echo ""
                         
-                        # Show outputs
+                        # Show deployment outputs
                         echo "Deployment Outputs:"
                         az deployment group show \
                           --resource-group $(RESOURCE_GROUP_NAME) \
@@ -82,8 +95,9 @@ stages:
                         exit 1
                       fi
                 
+                # Display connection instructions
                 - task: PowerShell@2
-                  displayName: 'Display Connection Info'
+                  displayName: 'Display Connection Information'
                   inputs:
                     targetType: 'inline'
                     script: |
@@ -92,12 +106,33 @@ stages:
                       Write-Host "DEPLOYMENT COMPLETE!"
                       Write-Host "=========================================="
                       Write-Host ""
-                      Write-Host "VM: $(VM_NAME)"
-                      Write-Host "Admin: $(ADMIN_USERNAME)"
-                      Write-Host "Key Vault: $(KEY_VAULT_NAME)"
+                      Write-Host "Virtual Machine Details:"
+                      Write-Host "- Name: $(VM_NAME)"
+                      Write-Host "- Admin Username: $(ADMIN_USERNAME)"
+                      Write-Host "- Location: $(LOCATION)"
+                      Write-Host "- Resource Group: $(RESOURCE_GROUP_NAME)"
                       Write-Host ""
-                      Write-Host "To retrieve password:"
-                      Write-Host "az keyvault secret show \"
-                      Write-Host "  --vault-name $(KEY_VAULT_NAME) \"
-                      Write-Host "  --name vmAdminPassword \"
-                      Write-Host "  --query value -o tsv"
+                      Write-Host "Key Vault:"
+                      Write-Host "- Name: $(KEY_VAULT_NAME)"
+                      Write-Host "- Secret: vmAdminPassword"
+                      Write-Host ""
+                      Write-Host "NEXT STEPS:"
+                      Write-Host "1. Retrieve password from Key Vault:"
+                      Write-Host "   az keyvault secret show \"
+                      Write-Host "     --vault-name $(KEY_VAULT_NAME) \"
+                      Write-Host "     --name vmAdminPassword \"
+                      Write-Host "     --query value -o tsv"
+                      Write-Host ""
+                      Write-Host "2. Configure JIT Access:"
+                      Write-Host "   - Go to Azure Portal → Microsoft Defender for Cloud"
+                      Write-Host "   - Navigate to 'Workload protections' → 'Just-in-time VM access'"
+                      Write-Host "   - Find VM: $(VM_NAME)"
+                      Write-Host "   - Click 'Enable JIT on 1 VM'"
+                      Write-Host "   - Configure RDP port 3389"
+                      Write-Host "   - Set max request time: 3 hours"
+                      Write-Host "   - Click 'Save'"
+                      Write-Host ""
+                      Write-Host "3. Request JIT access when needed"
+                      Write-Host "4. Connect via RDP with password from Key Vault"
+                      Write-Host ""
+                      Write-Host "✅ Deployment pipeline completed!"
