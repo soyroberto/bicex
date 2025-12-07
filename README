@@ -1,16 +1,103 @@
-## Bicep Azure VM Deploy
-Read the full howto at 
-[text](https://allthingscloud.net/handson-deploying-a-secure-sql-server-vm-on-azure-with-infrastructure-as-code-and-just-in-time-access)
-This deployment demonstrates a production-ready pattern for secure Azure VM deployment that balances security, automation, and maintainability. By leveraging BICEP, secure secret management, and Just-in-Time access, organizations can significantly reduce their attack surface while maintaining operational efficiency.
+Azure VM Deployment with Bicep
+This repository demonstrates a production-ready pattern for deploying secure Azure Virtual Machines using Bicep (Infrastructure as Code). The solution emphasizes security, automation, and maintainability through secure secret management and Just-in-Time (JIT) access.
 
-The complete solution took approximately 2 hours from initial repository creation to successful VM connection, with the majority of time spent on configuration and debugging rather than manual infrastructure provisioning. Subsequent deployments would take under 15 minutes, showcasing the power of automated infrastructure delivery.
+📖 Complete Tutorial: Read the full implementation guide at https://allthingscloud.net/handson-deploying-a-secure-sql-server-vm-on-azure-with-infrastructure-as-code-and-just-in-time-access
 
-Key Metrics:
+Solution Overview
+This deployment pattern significantly reduces the attack surface while maintaining operational efficiency by leveraging:
 
-Code artifacts: 2 Bicep files under the bicep folder, 1 pipeline YAML
+Bicep for infrastructure as code
 
-Azure resources: 6 resources deployed (VM, NIC, Public IP, OS Disk, NSG reference, VNet reference)
+Azure Key Vault for secure secret management
 
-Security controls: 3 layers (RBAC, Key Vault, JIT)
+Just-in-Time (JIT) VM access for reduced exposure
 
-Automation level: 95% automated, manual JIT request only
+Automated deployment pipelines
+
+Deployment Metrics
+Initial Setup: ~2 hours (repository creation to successful VM connection)
+
+Subsequent Deployments: <15 minutes
+
+Automation Level: 95% automated (only JIT request requires manual action)
+
+Repository Structure
+text
+├── bicep/                 # Bicep infrastructure templates
+│   ├── main.bicep        # Main deployment template
+│   └── modules/          # Reusable Bicep modules (if applicable)
+├── .github/workflows/    # CI/CD pipeline definitions
+│   └── deploy.yml        # Deployment pipeline
+└── README.md             # This documentation
+Azure Resources Deployed
+The deployment creates the following resources:
+
+Virtual Machine
+
+Network Interface (NIC)
+
+Public IP Address
+
+OS Disk
+
+Network Security Group (reference)
+
+Virtual Network (reference)
+
+Security Controls
+RBAC (Role-Based Access Control): Least privilege access management
+
+Azure Key Vault: Secure storage of secrets and credentials
+
+Just-in-Time VM Access: Time-limited access to reduce exposure
+
+Getting Started
+Prerequisites
+Azure subscription
+
+Azure CLI installed
+
+GitHub repository (for pipeline deployment)
+
+Deployment Options
+Option 1: Manual Deployment with Azure CLI
+bash
+# Login to Azure
+az login
+
+# Deploy the Bicep template
+az deployment group create \
+  --resource-group <your-resource-group> \
+  --template-file bicep/main.bicep \
+  --parameters @bicep/parameters.json
+Option 2: Automated Deployment via GitHub Actions
+Configure the following GitHub Secrets:
+
+AZURE_CREDENTIALS: Service principal credentials
+
+AZURE_SUBSCRIPTION: Subscription ID
+
+AZURE_RG: Target resource group
+
+Push to the main branch to trigger deployment
+
+Just-in-Time Access Workflow
+Deploy infrastructure using Bicep templates
+
+Request JIT access through Azure Portal or CLI
+
+Connect to VM during approved access window
+
+Access automatically expires after configured duration
+
+Best Practices Implemented
+✅ Infrastructure as Code with Bicep
+
+✅ Secrets management with Key Vault
+
+✅ Reduced attack surface with JIT access
+
+✅ Automated deployment pipelines
+
+✅ Modular, maintainable code structure
+
